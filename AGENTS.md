@@ -412,7 +412,8 @@ Use this execution loop for backend work:
 5. Edit only the generated editable module, not `__main__.py`. If the module
    exists without a wrapper, stop and repair/create the action through the MCP
    action tool before continuing.
-6. Add Python libraries with `action-requirements`.
+6. Add Python libraries with `action-requirements` — never with a virtualenv or
+   a `requirements.txt`.
 7. Wait for the managed `ops ide devel` watcher after each coherent action
    change batch, then run the checker. If setup actions changed, run
    `timeout 120 ops ide setup` only after the checker passes. Inspect failures,
@@ -1017,6 +1018,11 @@ Examples of idempotent setup:
 
 - Add frontend dependencies to `package.json`, then run `npm install`.
 - Add Python dependencies only with `action-requirements`.
+- Never create a virtualenv (`python -m venv`, `virtualenv`, `uv venv`, or any
+  `.venv`/`venv` directory) and never create or edit a `requirements.txt`.
+  Actions are built and deployed server-side, so a local virtualenv is never
+  used at runtime — it only leaves artifacts that Clean has to remove.
+  `action-requirements` is the only supported path.
 - Before importing a non-stdlib Python package such as `bcrypt`, `jwt`,
   `requests`, or a database driver, add it with `action-requirements` and
   redeploy the action.
