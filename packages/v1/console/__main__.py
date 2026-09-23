@@ -6,12 +6,17 @@ import types, os, console
 
 builder = []
 ## build-context ##
+#--param ext_redisurl "$ext_redisurl"
+#--param ext_redis_prefix "$ext_redis_prefix"
 #--param REDIS_URL "$REDIS_URL"
 #--param REDIS_PREFIX "$REDIS_PREFIX"
 import redis
 def init_redis(args, ctx):
-  ctx.REDIS = redis.from_url(args.get("REDIS_URL", os.getenv("REDIS_URL")), decode_responses=True)
-  ctx.REDIS_PREFIX = args.get("REDIS_PREFIX", os.getenv("REDIS_PREFIX"))
+  # console.resolve_redis_config prefers ext_redisurl/ext_redis_prefix and
+  # falls back to REDIS_URL/REDIS_PREFIX; the module validates missing/empty.
+  url, prefix = console.resolve_redis_config(args, os.environ)
+  ctx.REDIS_PREFIX = prefix
+  ctx.REDIS = redis.from_url(url, decode_responses=True) if url else None
 builder.append(init_redis)
 
 def main(args):

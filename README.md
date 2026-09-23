@@ -3,8 +3,26 @@
 An interactive Redis console for **learning, exploring, and testing** Redis
 functionality, built with React + Tailwind on the frontend and Nuvolaris /
 Apache OpenServerless actions on the backend. All Redis operations go through a
-single public action, `v1/console`, that uses the generated Redis wiring
-(`ctx.REDIS` / `ctx.REDIS_PREFIX`).
+single public action, `v1/console`, that uses the OpenServerless-provided Redis
+wiring (`ctx.REDIS` / `ctx.REDIS_PREFIX`).
+
+## Redis configuration
+
+The backend connects using the OpenServerless environment, never hardcoded
+parameters:
+
+- `ext_redisurl` — the Redis connection URL (may carry credentials and
+  connection parameters). Used to build the `redis.Redis` client.
+- `ext_redis_prefix` — the key prefix that namespaces this app's keys.
+
+`console.resolve_redis_config` prefers these `ext_*` variables and falls back to
+the platform `REDIS_URL` / `REDIS_PREFIX` wiring when they are absent, so the
+app runs unchanged on deployments that expose either name. The prefix is applied
+transparently on the backend and stripped before keys reach the browser, so the
+UI shows clean names while every Redis access stays inside the app namespace.
+`ext_redisurl` is never sent to the browser; a missing/invalid URL or a
+missing/empty prefix is reported as an explicit error instead of connecting
+without a namespace.
 
 ## Architecture
 
@@ -120,7 +138,8 @@ panel for each section.
 ## Notes / limitations
 
 - All keys are automatically namespaced with the app's Redis prefix
-  (`redisconsole2:`).
+  (`ext_redis_prefix`, e.g. `redisconsole:`). The frontend never sees the
+  prefix; the backend adds it exactly once on every access.
 - Pub/Sub `PUBLISH` may be restricted by the platform Redis ACL; `SUBSCRIBE`
   requires a long-lived connection that serverless actions cannot hold, so only
   publish + channel discovery are exposed. The Pub/Sub section explains this

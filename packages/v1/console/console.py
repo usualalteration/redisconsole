@@ -9,13 +9,14 @@ matching Redis call.
 Connection model
 -----------------
 The generated wrapper builds ``ctx.REDIS`` (a live ``redis.Redis`` client with
-``decode_responses=True``) and ``ctx.REDIS_PREFIX`` from the platform-managed
-``REDIS_URL`` / ``REDIS_PREFIX`` parameters. The module never reads
-credentials, hosts, ports, or passwords from the environment directly —
-connection parameters come from Nuvolaris/OpenServerless configuration. This
-satisfies the requirement to support REDIS_HOST/REDIS_PORT/REDIS_USERNAME/
-REDIS_PASSWORD/REDIS_DB style configuration through the platform wiring rather
- than hardcoding them in app source.
+``decode_responses=True``) and ``ctx.REDIS_PREFIX`` from the OpenServerless
+environment. ``resolve_redis_config`` is the single source of truth for which
+variables are consulted: it prefers ``ext_redisurl`` / ``ext_redis_prefix``
+(the OpenServerless-provided Redis URL and key prefix) and falls back to the
+platform ``REDIS_URL`` / ``REDIS_PREFIX`` wiring when the ``ext_*`` names are
+absent. The URL may carry credentials and connection parameters; the module
+never reads hosts, ports, or passwords directly and never hardcodes them —
+everything comes from OpenServerless configuration.
 
 Response envelope
 -----------------
@@ -78,12 +79,49 @@ def request_data(args):
         except Exception:
             body = {}
     merged = dict(body) if isinstance(body, dict) else {}
+    # Connection variables are backend-only and must never be honored from a
+    # browser-supplied request; drop them so the frontend cannot inject or
+    # read Redis credentials/prefix through the request body.
     ignored = {
-        "body", "REDIS_URL", "REDIS_PREFIX",
+        "body",
+        "REDIS_URL", "REDIS_PREFIX", "ext_redisurl", "ext_redis_prefix",
         "__ow_method", "__ow_headers", "__ow_path", "__ow_body",
     }
     merged.update({k: v for k, v in data.items() if k not in ignored})
     return merged
+
+
+def resolve_redis_config(args, environ=None):
+    """Resolve the Redis connection URL and key prefix from the OpenServerless
+    environment.
+
+    The OpenServerless-provided variables ``ext_redisurl`` and
+    ``ext_redis_prefix`` take precedence; the platform ``REDIS_URL`` /
+    ``REDIS_PREFIX`` wiring is used as a fallback when the ``ext_*`` names are
+    not present. Bound action parameters (``args``) win over process
+    environment, and empty strings are treated as "not set" so an unset
+    ``$ext_redisurl`` param cleanly falls back. Returns ``(url, prefix)`` where
+    either may be ``None`` when the environment is not configured — the caller
+    turns that into an explicit error rather than connecting without a
+    namespace.
+    """
+    if environ is None:
+        environ = os.environ
+    args = args if isinstance(args, dict) else {}
+
+    def pick(*names):
+        for name in names:
+            value = args.get(name)
+            if value not in (None, ""):
+                return value
+            value = environ.get(name)
+            if value not in (None, ""):
+                return value
+        return None
+
+    url = pick("ext_redisurl", "REDIS_URL")
+    prefix = pick("ext_redis_prefix", "REDIS_PREFIX")
+    return url, prefix
 
 
 def request_method(args):
@@ -1251,8 +1289,20 @@ def _apply_timeouts(ctx):
 
 
 def main(args, ctx=None):
+    # A missing/invalid ext_redisurl leaves the wrapper unable to build a
+    # client. Report it as a connection error without leaking any connection
+    # detail (the module never receives the URL, only the client + prefix).
     if not ctx or not hasattr(ctx, "REDIS") or ctx.REDIS is None:
-        return err("Redis not configured", "RedisConnectionError")
+        return err("Redis is not configured: 'ext_redisurl' is missing or invalid",
+                   "RedisConnectionError")
+
+    # The key prefix is the namespace boundary. Operating without it would let
+    # requests reach keys outside this app's namespace, so a missing/empty
+    # ext_redis_prefix is a hard error, not a silent unprefixed run.
+    prefix = getattr(ctx, "REDIS_PREFIX", None)
+    if prefix is None or not str(prefix).strip():
+        return err("Redis namespace is not configured: 'ext_redis_prefix' is "
+                   "missing or empty", "RedisConfigError")
 
     _apply_timeouts(ctx)
 
