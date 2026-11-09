@@ -24,6 +24,8 @@ UI shows clean names while every Redis access stays inside the app namespace.
 missing/empty prefix is reported as an explicit error instead of connecting
 without a namespace.
 
+![](screenshot.png)
+
 ## Architecture
 
 - **Frontend** (`src/`): React + TypeScript + Tailwind, HashRouter, shadcn/ui.
